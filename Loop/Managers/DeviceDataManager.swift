@@ -61,7 +61,7 @@ final class DeviceDataManager {
 
             NotificationCenter.default.post(name: .PumpManagerChanged, object: self, userInfo: nil)
 
-            UserDefaults.appGroup?.pumpManager = pumpManager
+            UserDefaults.appGroup?.pumpManagerRawValue = pumpManager?.rawValue
         }
     }
 
@@ -75,24 +75,37 @@ final class DeviceDataManager {
 
     private var statusExtensionManager: StatusExtensionDataManager!
 
+    // MARK: - Plugins
+
+    private var pluginManager: PluginManager
+
     // MARK: - Initialization
+
 
     private(set) var loopManager: LoopDataManager!
 
     init() {
-        pumpManager = UserDefaults.appGroup?.pumpManager as? PumpManagerUI
+        pluginManager = PluginManager()
+
+        if let pumpManagerRawValue = UserDefaults.appGroup?.pumpManagerRawValue {
+            pumpManager = pumpManagerFromRawValue(pumpManagerRawValue)
+        } else {
+            pumpManager = nil
+        }
 
         if let cgmManager = UserDefaults.appGroup?.cgmManager {
             self.cgmManager = cgmManager
-        } else if UserDefaults.appGroup?.isCGMManagerValidPumpManager == true {
+        } else if isCGMManagerValidPumpManager {
             self.cgmManager = pumpManager as? CGMManager
         }
         
         remoteDataManager.delegate = self
         statusExtensionManager = StatusExtensionDataManager(deviceDataManager: self)
+
         loopManager = LoopDataManager(
             lastLoopCompleted: statusExtensionManager.context?.lastLoopCompleted,
-            lastTempBasal: statusExtensionManager.context?.netBasal?.tempBasal
+            basalDeliveryState: pumpManager?.status.basalDeliveryState,
+            lastPumpEventsReconciliation: pumpManager?.lastReconciliation
         )
         watchManager = WatchDataManager(deviceManager: self)
         nightscoutDataManager = NightscoutDataManager(deviceDataManager: self)
@@ -108,6 +121,41 @@ final class DeviceDataManager {
         setupPump()
         setupCGM()
     }
+
+    var isCGMManagerValidPumpManager: Bool {
+        guard let rawValue = UserDefaults.appGroup?.cgmManagerState else {
+            return false
+        }
+
+        return pumpManagerTypeFromRawValue(rawValue) != nil
+    }
+
+    var availablePumpManagers: [AvailableDevice] {
+        return pluginManager.availablePumpManagers + availableStaticPumpManagers
+    }
+
+    public func pumpManagerTypeByIdentifier(_ identifier: String) -> PumpManagerUI.Type? {
+        return pluginManager.getPumpManagerTypeByIdentifier(identifier) ?? staticPumpManagersByIdentifier[identifier] as? PumpManagerUI.Type
+    }
+
+    private func pumpManagerTypeFromRawValue(_ rawValue: [String: Any]) -> PumpManager.Type? {
+        guard let managerIdentifier = rawValue["managerIdentifier"] as? String else {
+            return nil
+        }
+
+        return pumpManagerTypeByIdentifier(managerIdentifier)
+    }
+
+    func pumpManagerFromRawValue(_ rawValue: [String: Any]) -> PumpManagerUI? {
+        guard let rawState = rawValue["state"] as? PumpManager.RawStateValue,
+            let Manager = pumpManagerTypeFromRawValue(rawValue)
+            else {
+                return nil
+        }
+
+        return Manager.init(rawState: rawState) as? PumpManagerUI
+    }
+
 }
 
 private extension DeviceDataManager {
@@ -145,24 +193,25 @@ private extension DeviceDataManager {
 
 // MARK: - Client API
 extension DeviceDataManager {
-    func enactBolus(units: Double, at startDate: Date = Date(), willRequest: ((DoseEntry) -> Void)? = nil, completion: @escaping (_ error: Error?) -> Void) {
+    func enactBolus(units: Double, at startDate: Date = Date(), completion: @escaping (_ error: Error?) -> Void) {
         guard let pumpManager = pumpManager else {
             completion(LoopError.configurationError(.pumpManager))
             return
         }
 
+        self.loopManager.addRequestedBolus(DoseEntry(type: .bolus, startDate: Date(), value: units, unit: .units), completion: nil)
         pumpManager.enactBolus(units: units, at: startDate, willRequest: { (dose) in
-            self.loopManager.addRequestedBolus(dose, completion: {
-                willRequest?(dose)
-            })
+            // No longer used...
         }) { (result) in
             switch result {
             case .failure(let error):
                 self.log.error(error)
                 NotificationManager.sendBolusFailureNotification(for: error, units: units, at: startDate)
-                completion(error)
+                self.loopManager.bolusRequestFailed(error) {
+                    completion(error)
+                }
             case .success(let dose):
-                self.loopManager.addConfirmedBolus(dose) {
+                self.loopManager.bolusConfirmed(dose) {
                     completion(nil)
                 }
             }
@@ -234,6 +283,7 @@ extension DeviceDataManager: CGMManagerDelegate {
                     }
                 }
 
+                self.log.default("Asserting current pump data")
                 self.pumpManager?.assertCurrentPumpData()
             }
         case .noData:
@@ -244,6 +294,7 @@ extension DeviceDataManager: CGMManagerDelegate {
             log.default("CGMManager:\(type(of: manager)) did update with error: \(error)")
 
             self.setLastError(error: error)
+            log.default("Asserting current pump data")
             pumpManager?.assertCurrentPumpData()
         }
 
@@ -275,7 +326,7 @@ extension DeviceDataManager: PumpManagerDelegate {
         dispatchPrecondition(condition: .onQueue(queue))
         log.default("PumpManager:\(type(of: pumpManager)) did update state")
 
-        UserDefaults.appGroup?.pumpManager = pumpManager
+        UserDefaults.appGroup?.pumpManagerRawValue = pumpManager.rawValue
     }
 
     func pumpManagerBLEHeartbeatDidFire(_ pumpManager: PumpManager) {
@@ -295,7 +346,7 @@ extension DeviceDataManager: PumpManagerDelegate {
             bleHeartbeatUpdateInterval = .minutes(1)
         case let interval?:
             // If we looped successfully less than 5 minutes ago, ignore the heartbeat.
-            log.default("PumpManager:\(type(of: pumpManager)) ignoring heartbeat. Last loop completed \(interval.minutes) ago")
+            log.default("PumpManager:\(type(of: pumpManager)) ignoring heartbeat. Last loop completed \(interval.minutes) minutes ago")
             return
         }
 
@@ -349,6 +400,10 @@ extension DeviceDataManager: PumpManagerDelegate {
             }
         }
 
+        if status.basalDeliveryState != oldStatus.basalDeliveryState {
+            loopManager.basalDeliveryState = status.basalDeliveryState
+        }
+
         // Update the pump-schedule based settings
         loopManager.setScheduleTimeZone(status.timeZone)
     }
@@ -379,16 +434,20 @@ extension DeviceDataManager: PumpManagerDelegate {
         nightscoutDataManager.uploadLoopStatus(loopError: error)
     }
 
-    func pumpManager(_ pumpManager: PumpManager, didReadPumpEvents events: [NewPumpEvent], completion: @escaping (_ error: Error?) -> Void) {
+    func pumpManager(_ pumpManager: PumpManager, hasNewPumpEvents events: [NewPumpEvent], lastReconciliation: Date?, completion: @escaping (_ error: Error?) -> Void) {
         dispatchPrecondition(condition: .onQueue(queue))
         log.default("PumpManager:\(type(of: pumpManager)) did read pump events")
 
-        loopManager.addPumpEvents(events) { (error) in
+        loopManager.addPumpEvents(events, lastReconciliation: lastReconciliation) { (error) in
             if let error = error {
                 self.log.error("Failed to addPumpEvents to DoseStore: \(error)")
             }
 
             completion(error)
+
+            if error == nil {
+                NotificationCenter.default.post(name: .PumpEventsAdded, object: self, userInfo: nil)
+            }
         }
     }
 
@@ -561,6 +620,11 @@ extension DeviceDataManager: CustomDebugStringConvertible {
     var debugDescription: String {
         return [
             Bundle.main.localizedNameAndVersion,
+            "* gitRevision: \(Bundle.main.gitRevision ?? "N/A")",
+            "* gitBranch: \(Bundle.main.gitBranch ?? "N/A")",
+            "* sourceRoot: \(Bundle.main.sourceRoot ?? "N/A")",
+            "* buildDateString: \(Bundle.main.buildDateString ?? "N/A")",
+            "* xcodeVersion: \(Bundle.main.xcodeVersion ?? "N/A")",
             "",
             "## DeviceDataManager",
             "* launchDate: \(launchDate)",
@@ -580,5 +644,6 @@ extension DeviceDataManager: CustomDebugStringConvertible {
 
 extension Notification.Name {
     static let PumpManagerChanged = Notification.Name(rawValue:  "com.loopKit.notification.PumpManagerChanged")
+    static let PumpEventsAdded = Notification.Name(rawValue:  "com.loopKit.notification.PumpEventsAdded")
 }
 

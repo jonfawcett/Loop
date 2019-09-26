@@ -17,8 +17,13 @@ final class StatusExtensionDataManager {
     init(deviceDataManager: DeviceDataManager) {
         self.deviceManager = deviceDataManager
 
-        NotificationCenter.default.addObserver(self, selector: #selector(update(_:)), name: .LoopDataUpdated, object: deviceDataManager.loopManager)
-        NotificationCenter.default.addObserver(self, selector: #selector(update(_:)), name: .PumpManagerChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(notificationReceived(_:)), name: .LoopDataUpdated, object: deviceDataManager.loopManager)
+        NotificationCenter.default.addObserver(self, selector: #selector(notificationReceived(_:)), name: .PumpManagerChanged, object: nil)
+       
+        // Wait until LoopDataManager has had a chance to initialize itself
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.update()
+        }
     }
 
     fileprivate var defaults: UserDefaults? {
@@ -29,7 +34,11 @@ final class StatusExtensionDataManager {
         return defaults?.statusExtensionContext
     }
 
-    @objc private func update(_ notification: Notification) {
+    @objc private func notificationReceived(_ notification: Notification) {
+        update()
+    }
+    
+    private func update() {
         guard let unit = (deviceManager.loopManager.glucoseStore.preferredUnit ?? context?.predictedGlucose?.unit) else {
             return
         }
@@ -42,6 +51,9 @@ final class StatusExtensionDataManager {
     }
 
     private func createContext(glucoseUnit: HKUnit, _ completionHandler: @escaping (_ context: StatusExtensionContext?) -> Void) {
+
+        let basalDeliveryState = deviceManager.pumpManager?.status.basalDeliveryState
+
         deviceManager.loopManager.getLoopState { (manager, state) in
             let dataManager = self.deviceManager
             var context = StatusExtensionContext()
@@ -66,11 +78,6 @@ final class StatusExtensionDataManager {
 
                 let lastLoopCompleted = Date(timeIntervalSinceNow: -TimeInterval(minutes: 0))
             #else
-                guard state.error == nil else {
-                    // TODO: unclear how to handle the error here properly.
-                    completionHandler(nil)
-                    return
-                }
                 let lastLoopCompleted = manager.lastLoopCompleted
             #endif
 
@@ -89,18 +96,13 @@ final class StatusExtensionDataManager {
                     interval: second.startDate.timeIntervalSince(first.startDate))
             }
 
-            let date = state.lastTempBasal?.startDate ?? Date()
-            if let scheduledBasal = manager.basalRateScheduleApplyingOverrideHistory?.between(start: date, end: date).first {
-                let netBasal = NetBasal(
-                    lastTempBasal: state.lastTempBasal,
-                    maxBasal: manager.settings.maximumBasalRatePerHour,
-                    scheduledBasal: scheduledBasal
-                )
-
+            if let basalDeliveryState = basalDeliveryState,
+                let basalSchedule = manager.basalRateScheduleApplyingOverrideHistory,
+                let netBasal = basalDeliveryState.getNetBasal(basalSchedule: basalSchedule, settings: manager.settings)
+            {
                 context.netBasal = NetBasalContext(rate: netBasal.rate, percentage: netBasal.percent, start: netBasal.start, end: netBasal.end)
             }
-            
-            
+
             context.batteryPercentage = dataManager.pumpManager?.status.pumpBatteryChargeRemaining
             context.reservoirCapacity = dataManager.pumpManager?.pumpReservoirCapacity
 
