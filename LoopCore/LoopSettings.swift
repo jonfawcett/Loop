@@ -10,6 +10,8 @@ import HealthKit
 
 public struct LoopSettings: Equatable {
     public var dosingEnabled = false
+    
+    public var nsUpload = false
 
     public let dynamicCarbAbsorptionEnabled = true
 
@@ -86,12 +88,14 @@ public struct LoopSettings: Equatable {
 
     public init(
         dosingEnabled: Bool = false,
+        nsUpload: Bool = false,
         glucoseTargetRangeSchedule: GlucoseRangeSchedule? = nil,
         maximumBasalRatePerHour: Double? = nil,
         maximumBolus: Double? = nil,
         suspendThreshold: GlucoseThreshold? = nil
     ) {
         self.dosingEnabled = dosingEnabled
+        self.nsUpload = nsUpload
         self.glucoseTargetRangeSchedule = glucoseTargetRangeSchedule
         self.maximumBasalRatePerHour = maximumBasalRatePerHour
         self.maximumBolus = maximumBolus
@@ -191,6 +195,10 @@ extension LoopSettings: RawRepresentable {
         if let dosingEnabled = rawValue["dosingEnabled"] as? Bool {
             self.dosingEnabled = dosingEnabled
         }
+        
+        if let nsUpload = rawValue["nsUpload"] as? Bool {
+            self.nsUpload = nsUpload
+        }
 
         if let glucoseRangeScheduleRawValue = rawValue["glucoseTargetRangeSchedule"] as? GlucoseRangeSchedule.RawValue {
             self.glucoseTargetRangeSchedule = GlucoseRangeSchedule(rawValue: glucoseRangeScheduleRawValue)
@@ -235,6 +243,7 @@ extension LoopSettings: RawRepresentable {
         var raw: RawValue = [
             "version": LoopSettings.version,
             "dosingEnabled": dosingEnabled,
+            "nsUpload": nsUpload,
             "overridePresets": overridePresets.map { $0.rawValue }
         ]
 

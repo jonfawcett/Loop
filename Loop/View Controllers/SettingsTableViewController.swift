@@ -80,6 +80,10 @@ final class SettingsTableViewController: UITableViewController {
         case loggly
         case amplitude
     }
+    
+    fileprivate enum NSRow: Int, CaseCountable {
+        case nsupload = 0
+    }
 
     fileprivate lazy var valueNumberFormatter: NumberFormatter = {
         let formatter = NumberFormatter()
@@ -150,6 +154,8 @@ final class SettingsTableViewController: UITableViewController {
             }
         case .services:
             return ServiceRow.count
+        case .nsupload:
+            return NSRow.count
         case .testingPumpDataDeletion, .testingCGMDataDeletion:
             return 1
         }
@@ -321,6 +327,19 @@ final class SettingsTableViewController: UITableViewController {
 
             configCell.accessoryType = .disclosureIndicator
             return configCell
+        case .nsupload:
+            switch NSRow(rawValue: indexPath.row)! {
+                case .nsupload:
+                    let switchCell = tableView.dequeueReusableCell(withIdentifier: SwitchTableViewCell.className, for: indexPath) as! SwitchTableViewCell
+
+                    switchCell.selectionStyle = .none
+                    switchCell.switch?.isOn = dataManager.loopManager.settings.nsUpload
+                    switchCell.textLabel?.text = NSLocalizedString("Upload BG to Nightscout", comment: "The title text for the NS Bg Upload enabled switch cell")
+
+                    switchCell.switch?.addTarget(self, action: #selector(nsUploadEnabledChanged(_:)), for: .valueChanged)
+
+                    return switchCell
+                }
         case .testingPumpDataDeletion:
             let cell = tableView.dequeueReusableCell(withIdentifier: TextButtonTableViewCell.className, for: indexPath) as! TextButtonTableViewCell
             cell.textLabel?.text = "Delete Pump Data"
@@ -350,6 +369,8 @@ final class SettingsTableViewController: UITableViewController {
             return NSLocalizedString("Configuration", comment: "The title of the configuration section in settings")
         case .services:
             return NSLocalizedString("Services", comment: "The title of the services section in settings")
+        case .nsupload:
+            return NSLocalizedString("Upload BG to Nightscout", comment: "The title of the NS BG Upload section in settings")
         case .testingPumpDataDeletion, .testingCGMDataDeletion:
             return nil
         }
@@ -604,6 +625,11 @@ final class SettingsTableViewController: UITableViewController {
 
                 show(vc, sender: sender)
             }
+        case .nsupload:
+            switch NSRow(rawValue: indexPath.row)! {
+                case .nsupload:
+                    break
+            }
         case .testingPumpDataDeletion:
             let confirmVC = UIAlertController(pumpDataDeletionHandler: { self.dataManager.deleteTestingPumpData() })
             present(confirmVC, animated: true) {
@@ -619,6 +645,11 @@ final class SettingsTableViewController: UITableViewController {
 
     @objc private func dosingEnabledChanged(_ sender: UISwitch) {
         dataManager.loopManager.settings.dosingEnabled = sender.isOn
+    }
+    
+    @objc private func nsUploadEnabledChanged(_ sender: UISwitch) {
+        dataManager.loopManager.settings.nsUpload = sender.isOn
+        
     }
 }
 

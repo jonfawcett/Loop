@@ -162,7 +162,7 @@ final class DeviceDataManager {
             log.default("CGMManager:\(type(of: manager)) did update with \(values.count) values")
             
             loopManager.addGlucose(values) { result in
-                if manager.shouldSyncToRemoteService {
+                if self.loopManager.settings.nsUpload {
                     switch result {
                     case .success(let values):
                         self.nightscoutDataManager.uploadGlucose(values, sensorState: manager.sensorState)
