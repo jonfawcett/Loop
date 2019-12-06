@@ -47,6 +47,7 @@ final class SettingsTableViewController: UITableViewController {
         case cgm
         case configuration
         case services
+        case nsupload
         case testingPumpDataDeletion
         case testingCGMDataDeletion
     }
