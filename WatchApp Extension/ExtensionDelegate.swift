@@ -78,10 +78,14 @@ final class ExtensionDelegate: NSObject, WKExtensionDelegate {
         if WCSession.default.activationState != .activated {
             WCSession.default.activate()
         }
+
+        NotificationCenter.default.post(name: type(of: self).didBecomeActiveNotification, object: self)
     }
 
     func applicationWillResignActive() {
         UserDefaults.standard.startOnChartPage = (WKExtension.shared().visibleInterfaceController as? ChartHUDController) != nil
+
+        NotificationCenter.default.post(name: type(of: self).willResignActiveNotification, object: self)
     }
 
     // Presumably the main thread?
@@ -221,6 +225,15 @@ extension ExtensionDelegate: WCSessionDelegate {
             } else {
                 log.error("Could not decode LoopSettingsUserInfo: %{public}@", userInfo)
             }
+        case SupportedBolusVolumesUserInfo.name:
+            guard let volumes = SupportedBolusVolumesUserInfo(rawValue: userInfo)?.supportedBolusVolumes else {
+                log.error("Could not decode SupportedBolusVolumesUserInfo: %{public}@", userInfo)
+                return
+            }
+
+            DispatchQueue.main.async {
+                self.loopManager.supportedBolusVolumes = volumes
+            }
         case "WatchContext":
             // WatchContext is the only userInfo type without a "name" key. This isn't a great heuristic.
             updateContext(userInfo)
@@ -239,6 +252,9 @@ extension ExtensionDelegate: UNUserNotificationCenterDelegate {
 
 
 extension ExtensionDelegate {
+    static let didBecomeActiveNotification = Notification.Name("com.loopkit.Loop.LoopWatch.didBecomeActive")
+
+    static let willResignActiveNotification = Notification.Name("com.loopkit.Loop.LoopWatch.willResignActive")
 
     /// Global shortcut to present an alert for a specific error out-of-context with a specific interface controller.
     ///

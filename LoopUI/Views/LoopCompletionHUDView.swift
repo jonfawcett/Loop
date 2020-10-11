@@ -8,23 +8,17 @@
 
 import UIKit
 import LoopKitUI
+import LoopCore
 
 public final class LoopCompletionHUDView: BaseHUDView {
 
     @IBOutlet private weak var loopStateView: LoopStateView!
     
     override public var orderPriority: HUDViewOrderPriority {
-        return 1
+        return 2
     }
 
-    enum Freshness {
-        case fresh
-        case aging
-        case stale
-        case unknown
-    }
-
-    private(set) var freshness = Freshness.unknown {
+    private(set) var freshness = LoopCompletionFreshness.unknown {
         didSet {
             updateTintColor()
         }
@@ -128,17 +122,8 @@ public final class LoopCompletionHUDView: BaseHUDView {
     @objc private func updateDisplay(_: Timer?) {
         if let date = lastLoopCompleted {
             let ago = abs(min(0, date.timeIntervalSinceNow))
-
-            switch ago {
-            case let t where t <= .minutes(6):
-                freshness = .fresh
-            case let t where t <= .minutes(16):
-                freshness = .aging
-            case let t where t <= .hours(12):
-                freshness = .stale
-            default:
-                freshness = .unknown
-            }
+            
+            freshness = LoopCompletionFreshness(age: ago)
 
             if let timeString = formatter.string(from: ago) {
                 switch traitCollection.preferredContentSizeCategory {
@@ -147,18 +132,18 @@ public final class LoopCompletionHUDView: BaseHUDView {
                      UIContentSizeCategory.medium,
                      UIContentSizeCategory.large:
                     // Use a longer form only for smaller text sizes
-                    caption.text = String(format: LocalizedString("%@ ago", comment: "Format string describing the time interval since the last completion date. (1: The localized date components"), timeString)
+                    caption?.text = String(format: LocalizedString("%@ ago", comment: "Format string describing the time interval since the last completion date. (1: The localized date components"), timeString)
                 default:
-                    caption.text = timeString
+                    caption?.text = timeString
                 }
 
                 accessibilityLabel = String(format: LocalizedString("Loop ran %@ ago", comment: "Accessbility format label describing the time interval since the last completion date. (1: The localized date components)"), timeString)
             } else {
-                caption.text = "—"
+                caption?.text = "—"
                 accessibilityLabel = nil
             }
         } else {
-            caption.text = "—"
+            caption?.text = "—"
             accessibilityLabel = LocalizedString("Waiting for first run", comment: "Acessibility label describing completion HUD waiting for first run")
         }
 

@@ -8,7 +8,6 @@
 
 import WatchKit
 import WatchConnectivity
-import CGMBLEKit
 import LoopKit
 import HealthKit
 import SpriteKit
@@ -118,7 +117,7 @@ final class ChartHUDController: HUDInterfaceController, WKCrownDelegate {
         super.willActivate()
 
         observers = [
-            NotificationCenter.default.addObserver(forName: .GlucoseSamplesDidChange, object: loopManager.glucoseStore, queue: nil) { [weak self] (note) in
+            NotificationCenter.default.addObserver(forName: GlucoseStore.glucoseSamplesDidChange, object: loopManager.glucoseStore, queue: nil) { [weak self] (note) in
                 self?.log.default("Received GlucoseSamplesDidChange notification: %{public}@. Updating chart", String(describing: note.userInfo ?? [:]))
 
                 DispatchQueue.main.async {
@@ -168,15 +167,17 @@ final class ChartHUDController: HUDInterfaceController, WKCrownDelegate {
                 cell.setContentInset(systemMinimumLayoutMargins)
             }
 
+            let isActiveContextStale = Date().timeIntervalSince(activeContext.creationDate) > loopManager.settings.inputDataRecencyInterval
+
             switch row {
             case .iob:
-                cell.setActiveInsulin(activeContext.activeInsulin)
+                cell.setActiveInsulin(isActiveContextStale ? nil : activeContext.activeInsulin)
             case .cob:
-                cell.setActiveCarbohydrates(activeContext.activeCarbohydrates)
+                cell.setActiveCarbohydrates(isActiveContextStale ? nil : activeContext.activeCarbohydrates)
             case .netBasal:
-                cell.setNetTempBasalDose(activeContext.lastNetTempBasalDose)
+                cell.setNetTempBasalDose(isActiveContextStale ? nil : activeContext.lastNetTempBasalDose)
             case .reservoirVolume:
-                cell.setReservoirVolume(activeContext.reservoirVolume)
+                cell.setReservoirVolume(isActiveContextStale ? nil : activeContext.reservoirVolume)
             }
         }
 
